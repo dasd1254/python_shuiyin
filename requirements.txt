@@ -1,0 +1,11 @@
+# Web 框架
+fastapi
+uvicorn
+python-multipart
+
+# 图像处理
+opencv-python-headless
+# 【关键】锁死 Numpy 版本，避开 2.0 的坑
+numpy==1.23.5
+paddlepaddle
+paddleocr>=2.7.0
