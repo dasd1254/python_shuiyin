@@ -3,7 +3,7 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # 1. 安装系统依赖
-# 【关键修改】将 libgl1-mesa-glx 改为 libgl1 (适配新版 Debian)
+# 【关键修改1111】将 libgl1-mesa-glx 改为 libgl1 (适配新版 Debian)
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
