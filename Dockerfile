@@ -22,23 +22,25 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # =========================================================
-# 2. 安装 Python 依赖 (修复报错的关键步骤)
+# 2. 安装 Python 依赖
 # =========================================================
 COPY requirements.txt .
 
 # [步骤1] 升级 pip
 RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# [步骤2] 预先强制安装科学计算库 (关键修改!!!)
-# 我们在这里显式指定安装 scikit-learn 的新版本，防止 pip 回溯到 0.x 版本
+# [步骤2] 关键修复！！！精准锁定科学计算库版本
+# 1. numpy==1.23.5: 严格匹配你的 requirements.txt，防止安装 numpy 2.0
+# 2. scikit-learn==1.3.2: 锁定一个支持 python 3.9 的现代二进制版本，防止回溯到 0.x 版本
+# 3. scipy==1.10.1: 配合 numpy 1.23 的稳定版本
 RUN pip install --no-cache-dir \
-    "numpy>=1.23.5" \
-    "scipy>=1.10.0" \
-    "scikit-learn>=1.3.0" \
+    "numpy==1.23.5" \
+    "scikit-learn==1.3.2" \
+    "scipy==1.10.1" \
     -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # [步骤3] 安装剩余依赖
-# 即使 requirements.txt 里有冲突，pip 会优先使用已安装的包，或者报错提示冲突（而不是去死循环编译旧包）
+# 此时 numpy 已经被锁定在 1.23.5，pip 不会再因为版本冲突去重新编译旧包
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # =========================================================
