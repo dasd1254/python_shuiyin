@@ -26,19 +26,19 @@ RUN apt-get update && apt-get install -y \
 # =========================================================
 COPY requirements.txt .
 
-# [关键步骤1] 升级 pip
-# 旧版 pip (23.0) 在处理复杂依赖回溯时很容易出错，升级到最新版 (25.x)
+# [步骤1] 升级 pip
 RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# [关键步骤2] 预先安装科学计算库
-# 强制安装较新的 numpy 和 scipy 二进制包，防止 pip 去下载古董版本进行源码编译
+# [步骤2] 预先强制安装科学计算库 (关键修改!!!)
+# 我们在这里显式指定安装 scikit-learn 的新版本，防止 pip 回溯到 0.x 版本
 RUN pip install --no-cache-dir \
     "numpy>=1.23.5" \
     "scipy>=1.10.0" \
+    "scikit-learn>=1.3.0" \
     -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# [关键步骤3] 安装剩余依赖
-# 即使 requirements.txt 里有冲突，因为上面已经装好了 numpy/scipy，pip 通常会复用已安装的版本
+# [步骤3] 安装剩余依赖
+# 即使 requirements.txt 里有冲突，pip 会优先使用已安装的包，或者报错提示冲突（而不是去死循环编译旧包）
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # =========================================================
