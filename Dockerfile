@@ -22,29 +22,32 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # =========================================================
-# 2. 安装 Python 依赖
+# 2. 准备依赖文件
 # =========================================================
 COPY requirements.txt .
 
-# [步骤1] 升级 pip
+# 升级 pip
 RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# [步骤2] 关键修复！！！精准锁定科学计算库版本
-# 1. numpy==1.23.5: 严格匹配你的 requirements.txt，防止安装 numpy 2.0
-# 2. scikit-learn==1.3.2: 锁定一个支持 python 3.9 的现代二进制版本，防止回溯到 0.x 版本
-# 3. scipy==1.10.1: 配合 numpy 1.23 的稳定版本
-RUN pip install --no-cache-dir \
-    "numpy==1.23.5" \
-    "scikit-learn==1.3.2" \
-    "scipy==1.10.1" \
-    -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-# [步骤3] 安装剩余依赖
-# 此时 numpy 已经被锁定在 1.23.5，pip 不会再因为版本冲突去重新编译旧包
-RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+# =========================================================
+# 3. 【核心修复】创建版本约束文件
+# =========================================================
+# 这里手动创建一个 constraints.txt 文件
+# 这告诉 pip：无论发生什么，都必须使用这几个版本，严禁去下载旧版本编译！
+RUN echo "numpy==1.23.5" > constraints.txt && \
+    echo "scipy==1.10.1" >> constraints.txt && \
+    echo "scikit-learn==1.3.2" >> constraints.txt
 
 # =========================================================
-# 3. 复制代码并启动
+# 4. 安装依赖 (带上 -c 参数)
+# =========================================================
+# 注意：这里加了 -c constraints.txt，这就像给 pip 戴上了紧箍咒
+RUN pip install --no-cache-dir -r requirements.txt \
+    -c constraints.txt \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# =========================================================
+# 5. 复制代码并启动
 # =========================================================
 COPY . .
 
