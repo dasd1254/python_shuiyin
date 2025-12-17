@@ -1,69 +1,67 @@
-from fastapi import FastAPI, File, UploadFile
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import StreamingResponse
+from simple_lama_inpainting import SimpleLama
+from PIL import Image
+import io
 import uvicorn
-import shutil
-import os
-import cv2
-import numpy as np
-from paddleocr import PaddleOCR
 
 app = FastAPI()
 
-# 允许跨域
+# ================= 新增跨域配置 =================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"],  # 允许所有来源，本地调试方便
+    allow_credentials=True,
+    allow_methods=["*"],  # 允许所有方法 (POST, GET 等)
+    allow_headers=["*"],  # 允许所有 Header
 )
+# ===============================================
 
-# 目录准备
-os.makedirs("uploads", exist_ok=True)
-os.makedirs("processed", exist_ok=True)
-app.mount("/result", StaticFiles(directory="processed"), name="result")
+# 1. 初始化模型 (启动时加载，可能需要几秒钟下载模型文件)
+print("正在加载 LaMa AI 模型，请稍候...")
+try:
+    lama_model = SimpleLama()
+    print("模型加载成功！")
+except Exception as e:
+    print(f"模型加载失败: {e}")
 
-# 初始化模型 (轻量版)
-print("正在加载 AI 模型...", flush=True)
-ocr = PaddleOCR(use_angle_cls=False, lang="ch", ocr_version='PP-OCRv4', use_gpu=False, enable_mkldnn=False)
-
-@app.post("/remove-watermark")
-async def remove_watermark(file: UploadFile = File(...)):
+@app.post("/api/remove-watermark")
+async def remove_watermark(
+    image: UploadFile = File(...), 
+    mask: UploadFile = File(...)
+):
+    """
+    接收原图(image)和蒙版(mask)进行 AI 修复
+    """
     try:
-        # 保存文件
-        file_path = f"uploads/{file.filename}"
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        # 1. 读取原图
+        image_bytes = await image.read()
+        original_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
-        # 读取图片
-        img = cv2.imread(file_path)
-        
-        # 识别
-        result = ocr.ocr(file_path, cls=False)
-        
-        # 如果没水印，直接返回
-        if not result or not result[0]:
-            shutil.copy(file_path, f"processed/processed_{file.filename}")
-            return {"code": 200, "data": {"url": f"/result/processed_{file.filename}"}}
+        # 2. 读取蒙版图
+        # 前端需要传一张黑白图：白色=水印区域，黑色=保留区域
+        mask_bytes = await mask.read()
+        mask_img = Image.open(io.BytesIO(mask_bytes)).convert("L") # 转为灰度
 
-        # 去水印
-        mask = np.zeros(img.shape[:2], np.uint8)
-        for line in result[0]:
-            points = np.array(line[0]).astype(np.int32)
-            x, y, w, h = cv2.boundingRect(points)
-            pad = 5
-            cv2.rectangle(mask, (max(0, x-pad), max(0, y-pad)), (min(img.shape[1], x+w+pad), min(img.shape[0], y+h+pad)), 255, -1)
-        
-        res_img = cv2.inpaint(img, mask, 5, cv2.INPAINT_TELEA)
-        
-        # 保存结果
-        out_name = f"processed_{file.filename}"
-        cv2.imwrite(f"processed/{out_name}", res_img)
-        
-        return {"code": 200, "msg": "成功", "data": {"url": f"/result/{out_name}"}}
+        # 3. 验证尺寸
+        if original_img.size != mask_img.size:
+            # 如果尺寸不一致，强制缩放蒙版以匹配原图
+            mask_img = mask_img.resize(original_img.size)
+
+        # 4. 执行 AI 修复
+        # result 也是一个 PIL Image 对象
+        result_img = lama_model(original_img, mask_img)
+
+        # 5. 返回图片
+        img_byte_arr = io.BytesIO()
+        result_img.save(img_byte_arr, format='PNG')
+        img_byte_arr.seek(0)
+
+        return StreamingResponse(img_byte_arr, media_type="image/png")
+
     except Exception as e:
-        print(f"Error: {e}")
-        return {"code": 500, "msg": str(e)}
+        print(f"Error: {str(e)}")
+        return {"code": 500, "msg": f"处理失败: {str(e)}"}
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=3001)
+if __name__ == '__main__':
+    uvicorn.run(app, host='0.0.0.0', port=3001)
