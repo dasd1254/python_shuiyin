@@ -5,14 +5,11 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # =========================================================
-# 配置国内 APT 源
+# 1. 安装系统依赖 (保持不变)
 # =========================================================
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list 2>/dev/null || \
     sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
 
-# =========================================================
-# 1. 安装系统依赖 & 编译工具
-# =========================================================
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
@@ -22,43 +19,49 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # =========================================================
-# 2. 准备依赖文件
+# 2. 准备环境
 # =========================================================
-COPY requirements.txt .
-
 # 升级 pip
 RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# =========================================================
-# 3. 【核心修复】创建更严格的版本约束文件
-# =========================================================
-# 我们在这里把可能会导致回溯的包全部锁死在“已知的稳定二进制版本”
-# scikit-image==0.19.3 是最后一个广泛支持旧依赖且不需要编译的稳定版
-# imageio==2.31.1 配合 scikit-image 使用
+# 创建版本约束文件 (这是防止回溯的“定海神针”)
 RUN echo "numpy==1.23.5" > constraints.txt && \
     echo "scipy==1.10.1" >> constraints.txt && \
     echo "scikit-learn==1.3.2" >> constraints.txt && \
-    echo "scikit-image==0.19.3" >> constraints.txt && \
-    echo "imageio==2.31.1" >> constraints.txt
+    echo "scikit-image==0.19.3" >> constraints.txt
 
 # =========================================================
-# 4. 安装依赖 (预装 + 约束)
+# 3. 分步安装依赖 (解决 resolution-too-deep 的关键！！！)
 # =========================================================
-# 先把这几个最难搞的包通过约束文件装好
-RUN pip install --no-cache-dir \
-    -c constraints.txt \
+
+# 第一步：先安装地基 (Numpy & PaddlePaddle)
+# 这一步最关键，先把 numpy 锁死，不让后面的包乱改版本
+RUN pip install --no-cache-dir -c constraints.txt \
     "numpy==1.23.5" \
-    "scikit-image==0.19.3" \
-    "scikit-learn==1.3.2" \
+    paddlepaddle \
     -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 然后安装 requirements.txt，依然带着紧箍咒 (-c)
-RUN pip install --no-cache-dir -r requirements.txt \
-    -c constraints.txt \
+# 第二步：安装 PaddleOCR (最重的包)
+# 单独安装它，Pip 只需要处理它的依赖，压力小很多
+RUN pip install --no-cache-dir -c constraints.txt \
+    "paddleocr>=2.7.0" \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 第三步：安装 Albumentations (冲突源)
+# 因为前面已经装好了 numpy/scikit-image，这一步会直接复用，不会报错
+RUN pip install --no-cache-dir -c constraints.txt \
+    "albumentations==1.3.1" \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 第四步：安装剩余的 Web 依赖 (FastAPI 等)
+# 复制 requirements.txt，安装剩下的东西
+COPY requirements.txt .
+RUN pip install --no-cache-dir -c constraints.txt \
+    -r requirements.txt \
     -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # =========================================================
-# 5. 复制代码并启动
+# 4. 复制代码并启动
 # =========================================================
 COPY . .
 
