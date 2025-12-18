@@ -18,7 +18,8 @@ RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
 RUN echo "numpy==1.23.5" > constraints.txt && \
     echo "scipy==1.10.1" >> constraints.txt && \
     echo "scikit-learn==1.3.2" >> constraints.txt && \
-    echo "scikit-image==0.19.3" >> constraints.txt
+    echo "scikit-image==0.19.3" >> constraints.txt && \
+    echo "imageio==2.31.1" >> constraints.txt
 
 # 分步安装
 RUN pip install --no-cache-dir -c constraints.txt "numpy==1.23.5" -i https://pypi.tuna.tsinghua.edu.cn/simple
@@ -28,10 +29,11 @@ RUN pip install --no-cache-dir -c constraints.txt -r requirements.txt -i https:/
 # =========================================================
 # 3. 【关键】强制植入模型到默认路径
 # =========================================================
-# 这是 SimpleLama 默认寻找的位置
+# 必须先创建目录
 RUN mkdir -p /root/.cache/torch/hub/checkpoints/
 
-# 复制当前目录下的 big-lama.pt 到系统默认缓存目录
+# 复制 big-lama.pt 到系统默认缓存目录
+# 注意：big-lama.pt 不需要提交到 Git（太大），但必须存在于服务器 Jenkins 的工作目录中
 COPY big-lama.pt /root/.cache/torch/hub/checkpoints/big-lama.pt
 
 # =========================================================

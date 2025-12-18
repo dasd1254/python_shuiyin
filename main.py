@@ -18,38 +18,26 @@ app.add_middleware(
 )
 
 lama_model = None
-MODEL_PATH = "/root/.cache/torch/hub/checkpoints/big-lama.pt"
 
-print("------------- 系统启动检查 -------------")
-# 1. 检查模型文件是否存在及大小
-if os.path.exists(MODEL_PATH):
-    size_mb = os.path.getsize(MODEL_PATH) / (1024 * 1024)
-    print(f"✅ 发现模型文件: {MODEL_PATH}")
-    print(f"📄 文件大小: {size_mb:.2f} MB (正常应约为 196 MB)")
-    if size_mb < 100:
-        print("⚠️ 警告：模型文件过小，可能下载不完整！")
-else:
-    print(f"❌ 未找到模型文件: {MODEL_PATH}")
-    # 打印一下当前目录看看文件在哪
-    print(f"当前目录文件: {os.listdir('.')}")
-
+# 打印启动日志
+print("------------- 系统启动 -------------")
 try:
-    print("🚀 正在加载 LaMa 模型...")
-    # 强制不使用环境变量，依赖默认路径
+    # 强制移除环境变量，确保使用默认路径 /root/.cache/torch/...
     if 'TORCH_HOME' in os.environ:
         del os.environ['TORCH_HOME']
     
+    print("🚀 开始加载 LaMa 模型...")
     lama_model = SimpleLama()
-    print("✅ 模型加载成功！服务已就绪。")
+    print("✅ 模型加载成功！")
 except Exception as e:
-    print(f"❌ 模型加载崩溃: {e}")
+    print(f"❌ 模型加载严重失败: {e}")
 
 @app.post("/api/remove-watermark")
 async def remove_watermark(image: UploadFile = File(...), mask: UploadFile = File(...)):
+    # 如果模型没加载成功，直接返回 500 状态码，让前端知道出错了
     if lama_model is None:
-        # 返回 500 状态码，这样前端能捕获到错误
         return StreamingResponse(
-            io.BytesIO(b"Model not loaded"), 
+            io.BytesIO(b"Model Load Failed"), 
             status_code=500, 
             media_type="text/plain"
         )
@@ -73,9 +61,9 @@ async def remove_watermark(image: UploadFile = File(...), mask: UploadFile = Fil
         return StreamingResponse(img_byte_arr, media_type="image/png")
 
     except Exception as e:
-        print(f"处理出错: {e}")
+        print(f"推理错误: {e}")
         return StreamingResponse(
-            io.BytesIO(str(e).encode()), 
+            io.BytesIO(f"Error: {e}".encode()), 
             status_code=500, 
             media_type="text/plain"
         )
