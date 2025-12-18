@@ -23,21 +23,21 @@ RUN echo "numpy==1.23.5" > constraints.txt && \
 
 # 分步安装
 RUN pip install --no-cache-dir -c constraints.txt "numpy==1.23.5" -i https://pypi.tuna.tsinghua.edu.cn/simple
+# 强制 CPU 版 torch
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -c constraints.txt -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# =========================================================
-# 3. 【关键】强制植入模型到默认路径
-# =========================================================
-# 必须先创建目录
-RUN mkdir -p /root/.cache/torch/hub/checkpoints/
+# 3. 【关键】植入模型 (只需这一处)
+# 手动创建目录
+RUN mkdir -p /root/.cache/simple_lama_inpainting/
 
-# 复制 big-lama.pt 到系统默认缓存目录
-# 注意：big-lama.pt 不需要提交到 Git（太大），但必须存在于服务器 Jenkins 的工作目录中
-COPY big-lama.pt /root/.cache/torch/hub/checkpoints/big-lama.pt
+# 复制 big-lama.pt 到指定目录
+# ⚠️ 注意：执行 docker build 前，请确保 big-lama.pt 就在 Dockerfile 旁边
+COPY big-lama.pt /root/.cache/simple_lama_inpainting/big-lama.pt
 
-# =========================================================
-
+# 4. 复制代码
 COPY . .
+
 EXPOSE 3001
+
 CMD ["python", "main.py"]
