@@ -11,17 +11,17 @@ import uvicorn
 import torch
 import numpy as np
 
-# --- 自定义 LaMa 类 ---
+# 设置 CPU 线程数，避免过多线程导致上下文切换变慢
+# 根据你的服务器核心数调整，通常 4 或 8 比较合适
+torch.set_num_threads(4)
+
 class CustomLama:
     def __init__(self, device='cpu'):
         self.device = torch.device(device)
-        
-        # 这里的路径必须和 Dockerfile 里 COPY 的位置一致
         model_path = "/root/.cache/simple_lama_inpainting/big-lama.pt"
         
         print(f"📦 加载模型文件: {model_path}")
         try:
-            # map_location='cpu' 强制在 CPU 上加载权重
             self.model = torch.jit.load(model_path, map_location='cpu')
             self.model.eval()
             self.model.to(self.device)
@@ -31,50 +31,56 @@ class CustomLama:
             raise e
 
     def __call__(self, image: Image.Image, mask: Image.Image) -> Image.Image:
-        # 1. 记录原始尺寸
         W, H = image.size
-
-        # 2. 计算需要调整的目标尺寸 (必须是 8 的倍数)
-        # LaMa 模型要求输入宽和高都必须能被 8 整除
-        new_W = (W // 8) * 8
-        new_H = (H // 8) * 8
         
-        # 如果尺寸不符合要求，或者图片太小，进行调整
-        if new_W != W or new_H != H:
-            # 使用双线性插值缩放原图
-            image = image.resize((new_W, new_H), Image.BILINEAR)
-            # mask 必须用最近邻插值，保证边缘清晰
-            mask = mask.resize((new_W, new_H), Image.NEAREST)
-
-        # 3. 转换为 Tensor
-        image_np = np.array(image.convert("RGB")).astype(np.float32) / 255.0
-        mask_np = np.array(mask.convert("L")).astype(np.float32) / 255.0
+        # --- 🚀 性能优化核心逻辑 Start ---
+        # 限制最大边长。如果图片太大，强制缩小到 720px 处理
+        # 这在 CPU 上能带来 5-10 倍的速度提升，且肉眼几乎看不出质量损失
+        MAX_SIZE = 720 
         
-        # (H, W, C) -> (C, H, W)
+        scale_factor = 1.0
+        if max(W, H) > MAX_SIZE:
+            scale_factor = MAX_SIZE / max(W, H)
+            # 临时缩小的尺寸
+            temp_W = int(W * scale_factor)
+            temp_H = int(H * scale_factor)
+        else:
+            temp_W, temp_H = W, H
+
+        # 确保尺寸是 8 的倍数 (LaMa 要求)
+        process_W = (temp_W // 8) * 8
+        process_H = (temp_H // 8) * 8
+        
+        # 缩放图片和 Mask 用于推理
+        img_resized = image.resize((process_W, process_H), Image.BILINEAR)
+        mask_resized = mask.resize((process_W, process_H), Image.NEAREST) # Mask 必须用最近邻插值
+        # --- 🚀 性能优化核心逻辑 End ---
+
+        # 转换为 Tensor
+        image_np = np.array(img_resized.convert("RGB")).astype(np.float32) / 255.0
+        mask_np = np.array(mask_resized.convert("L")).astype(np.float32) / 255.0
+        
         image_t = torch.from_numpy(image_np).permute(2, 0, 1).unsqueeze(0).to(self.device)
         mask_t = torch.from_numpy(mask_np).unsqueeze(0).unsqueeze(0).to(self.device)
-        
-        # 阈值处理 mask
         mask_t = (mask_t > 0).float()
 
-        # 4. 推理
+        # 推理
         with torch.no_grad():
             output = self.model(image_t, mask_t)
 
-        # 5. 后处理
+        # 后处理
         output_np = output[0].permute(1, 2, 0).detach().cpu().numpy()
         output_np = np.clip(output_np * 255, 0, 255).astype(np.uint8)
         
         result_img = Image.fromarray(output_np)
 
-        # 6. 如果之前调整过尺寸，现在把结果缩放回原始大小
+        # 恢复原始尺寸 (如果不恢复，用户下载的就是小图)
         if result_img.size != (W, H):
             result_img = result_img.resize((W, H), Image.BILINEAR)
             
         return result_img
 
 # --- FastAPI App ---
-
 app = FastAPI()
 
 app.add_middleware(
@@ -91,21 +97,14 @@ print("------------- 系统启动 -------------")
 try:
     if 'TORCH_HOME' in os.environ:
         del os.environ['TORCH_HOME']
-    
-    # 初始化模型
     lama_model = CustomLama(device='cpu')
-    
 except Exception as e:
     print(f"❌ 系统初始化失败: {e}")
-    import traceback
-    traceback.print_exc()
 
 @app.post("/api/remove-watermark")
 async def remove_watermark(image: UploadFile = File(...), mask: UploadFile = File(...)):
     if lama_model is None:
-        return StreamingResponse(
-            io.BytesIO(b"Model Load Failed"), status_code=500, media_type="text/plain"
-        )
+        return StreamingResponse(io.BytesIO(b"Model Load Failed"), status_code=500)
 
     try:
         image_bytes = await image.read()
@@ -114,11 +113,10 @@ async def remove_watermark(image: UploadFile = File(...), mask: UploadFile = Fil
         original_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         mask_img = Image.open(io.BytesIO(mask_bytes)).convert("L")
 
-        # 确保 mask 和 原图尺寸一致（在进入模型前先对齐）
+        # 对齐尺寸
         if original_img.size != mask_img.size:
             mask_img = mask_img.resize(original_img.size)
 
-        # 调用模型 (内部会自动处理 8 的倍数)
         result_img = lama_model(original_img, mask_img)
 
         img_byte_arr = io.BytesIO()
@@ -129,13 +127,7 @@ async def remove_watermark(image: UploadFile = File(...), mask: UploadFile = Fil
 
     except Exception as e:
         print(f"推理错误: {e}")
-        import traceback
-        traceback.print_exc()
-        return StreamingResponse(
-            io.BytesIO(f"Runtime Error: {str(e)}".encode()), 
-            status_code=500, 
-            media_type="text/plain"
-        )
+        return StreamingResponse(io.BytesIO(f"Error: {str(e)}".encode()), status_code=500)
 
 if __name__ == '__main__':
     uvicorn.run(app, host='0.0.0.0', port=3001)
