@@ -106,7 +106,7 @@ def decode_base64(data_str):
         data_str = data_str.split(',')[1]
     return base64.b64decode(data_str)
 
-@app.post("/api/remove-watermark")
+@app.post("/api/remove-watermark-base64")
 async def remove_watermark(data: RemoveWatermarkRequest):
     """
     修改后的接口：接收 JSON Body
