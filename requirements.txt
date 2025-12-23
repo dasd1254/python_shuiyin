@@ -1,12 +1,7 @@
 fastapi
 uvicorn
 python-multipart
-# opencv-python-headless 在 simple-lama 中可能已包含，但保留也可以
 opencv-python-headless
-# 关键库
-simple-lama-inpainting
 Pillow
-numpy==1.23.5
-# 移除 paddle 相关的（如果你不再用 paddleocr，否则保留）
-# paddlepaddle...
-# paddleocr...
+simple-lama-inpainting
+# 注意：不要在这里写 torch，我们在 Dockerfile 里单独装 CPU 版
